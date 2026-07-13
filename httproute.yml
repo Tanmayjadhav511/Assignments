@@ -1,0 +1,91 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: company-route
+spec:
+  parentRefs:
+  - name: company-gateway
+  hostnames:
+  - web.company.local
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: nginx
+      port: 80
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-route
+spec:
+  parentRefs:
+  - name: company-gateway
+  hostnames:
+  - api.company.local
+  rules:
+  # /orders -> rewritten to httpbin's /anything, with headers injected,
+  # and a request timeout. This single rule proves path-based routing,
+  # URL rewrite, header injection, and timeout all at once.
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /orders
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /anything
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        add:
+        - name: X-Gateway-Source
+          value: imesh-envoy-gateway
+        - name: X-Route
+          value: orders-route
+    backendRefs:
+    - name: httpbin
+      port: 8080
+    timeouts:
+      request: 5s
+      backendRequest: 3s
+  # everything else on api.company.local goes straight to httpbin
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: httpbin
+      port: 8080
+    timeouts:
+      request: 5s
+      backendRequest: 3s
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: test-route
+spec:
+  parentRefs:
+  - name: company-gateway
+  hostnames:
+  - test.company.local
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        add:
+        - name: X-Gateway-Source
+          value: imesh-envoy-gateway
+    backendRefs:
+    - name: echoserver
+      port: 80
