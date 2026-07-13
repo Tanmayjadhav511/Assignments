@@ -2,7 +2,7 @@ Assignment No. 3
 Overview
 Installed cert-manager and configured a private self-signed Certificate Authority to issue TLS certificates for the cluster. Enabled HTTPS on the Envoy Gateway using a cert-manager-issued wildcard certificate covering all three application hostnames.
 Components Created
-•	Bootstrap self-signed Issuer
+•	Bootstrap self-signed Issuer	
 •	Root CA Certificate (imesh-root-ca)
 •	ClusterIssuer (imesh-ca-issuer)
 •	Wildcard TLS Certificate (company-local-tls)
@@ -45,3 +45,39 @@ Kubernetes / TLS Resources Verified
 •	End-to-end TLS handshake with full CA chain validation (no -k flag needed)
 •	Correct routing over HTTPS to nginx, httpbin, and echoserver (confirmed via X-Forwarded-Proto: https in backend responses)
 •	Certificate details via openssl x509 (subject, issuer, validity window)
+
+
+Theory questions
+1. What is a Certificate Authority?
+      CA is the certificate provider trust which issues the SSL/TSL certificate. They issues certificate for secure browsing for websites.  With this certificate users can securely access the website without worrying about security. These digital certificates contain credentials confirming an authentic online identity or other verified attributes.
+      Any browser that shows http means that the website is not secure and can be breached so whenever any organization issues this certificate and update to its website then the website becomes more secure and trustworthy
+      CA verify the organization and help them to get digital certificate so the trust between organization and user remains same this authority follows strict policies and procedures and have regular audits 
+
+
+ 2. Why is a CA required?
+        CA is required for to generate digital certificates for the organization this ca generate digital certificates which contains credentials confirming an authentica online identity 
+        If user ever seen a browser warning that a website is Not Secure, it usually means the site doesn't have a valid TLS/SSL certificate or its certificate has expired. Any website that wants to display HTTPS and the padlock icon must first obtain a trusted certificate from a publicly trusted certificate authority. 
+        CA performs checks to ensure the requester has the right to receive it. Those checks help establish trust in the certificate and the identity or resource it represents.
+
+ 3. How does cert-manager issue certificates?
+      Cert-manager is a Kubernetes controller that helps obtaining, renewing and managing TLS/SSL certificates 
+      Cert-manager requests certificates from a certificate authority(CA) and stores them as Secrets and renews them before they expire.
+1.	you create a certificate yml which contains and secrete name issuer and the dns entry 
+2.	Then the request is made from the issuer 
+3.	Then the certificate travel from the http protocol and after verification https gets generate
+4.	After getting certificate from ca cert-manages the whole certification inside Kubernetes
+
+ 4. What happens when a certificate expires?
+     If certificate ever get expires the user starts to get the unsecure browsing error and unsafe popup and user starts to feel unsafe about their credentials.
+    There is a high risk of data leak  and a hacking chances to avoid any accident organization needs to renew the certificate as soon as possible
+   Usually their the certificate life is around for 1 year and needed to renew the certificate often 
+
+
+5.How does automatic renewal work?
+    Cert-manager can be use for auto renewal , It continuously monitors issued certificates and renews them before they expire, so applications can continue serving HTTPS without interruption 
+      When a certificate is issued, cert-manager records its validity period cert-manager periodically checks all managed Certificate resources. Instead of waiting until the expiration date, cert-manager starts the renewal process before the certificate becomes invalid. When it's time to renew, cert-manager creates a new Certificate Request, just as it did when the certificate was first issued. Domain validation is performed again
+      The CA issues a renewed certificate cert-manager replaces the contents of the existing Secret. Applications use the renewed certificate
+
+
+6. How would you verify a certificate from the command line?
+     You can verify a TLS certificate from the command line using OpenSSL, kubectl, and other utilities depending on where the certificate is stored.
