@@ -1,0 +1,262 @@
+Assignment No. 2
+
+Overview
+Exposed all three applications (nginx, httpbin, echoserver) using Envoy Gateway with the Kubernetes Gateway API. Implemented host-based routing, path-based routing, URL rewrite, header injection, request timeout, retry policy, and rate limiting, and verified each one using curl.
+Applications Exposed
+Host	Backend
+web.company.local	nginx
+api.company.local	httpbin
+test.company.local	echoserver
+Implementation Details
+•	Installed Envoy Gateway (v1.8.2) via its Helm chart into the envoy-gateway-system namespace; confirmed GatewayClass eg was Accepted: True.
+•	Created a Gateway resource (company-gateway) with a single HTTP listener on port 80, hostname *.company.local.
+•	Created three HTTPRoute resources (company-route, api-route, test-route), one per hostname, attached to company-gateway.
+•	On api-route, added a dedicated rule for /orders implementing: 
+o	Path-based routing — matched via PathPrefix: /orders
+o	URL rewrite — rewritten to httpbin's /anything endpoint
+o	Header injection — added X-Gateway-Source and X-Route headers
+o	Request timeout — request: 5s, backendRequest: 3s
+•	Created a BackendTrafficPolicy (api-retry-policy) attached to api-route — 3 retries on 5xx/reset/connect-failure, with backoff.
+•	Created a BackendTrafficPolicy (test-rate-limit-policy) attached to test-route — local rate limiting at 10 requests/minute.
+•	Verified every behavior with curl against the live Gateway.
+Problems Faced & How I Solved Them
+1. Gateway stuck at Programmed: False (AddressNotAssigned)
+The Envoy Gateway Service came up as type: LoadBalancer, and kind has no cloud load-balancer controller, so EXTERNAL-IP stayed <pending> forever. I confirmed via kubectl describe gateway that this was cosmetic — the listener itself was Accepted/ResolvedRefs: True with all 3 routes attached — so I bypassed it using kubectl port-forward directly to the Envoy Service instead of waiting on an external IP.
+2. docker ps / kind get clusters couldn't see my running cluster
+Diagnosed this as a Docker context mismatch — my active context was default (a local dockerd socket) instead of desktop-linux (Docker Desktop's actual engine, which is what kind had used to create the cluster). Confirmed with docker context ls and switched using docker context use desktop-linux. kubectl itself was unaffected throughout, since it talks via kubeconfig, not the Docker CLI.
+3. Port-forward failed with "address already in use" on 8080
+Port 8080 was already occupied locally by Jenkins. Rather than stop Jenkins, I just used a different local port for the forward (18080:80), which avoided the conflict entirely.
+4. BackendTrafficPolicy rejected with unknown field "spec.rateLimit.local.defaultLimit"
+The CRD schema differs by Envoy Gateway version — defaultLimit isn't valid on v1.8.2. Fixed by removing that field; the rules list alone acts as the effective limit.
+5. Retry policy looked unverified from logs (only 2 of 4 expected attempts showed up)
+httpbin runs 2 replicas, and Envoy load-balances every retry attempt across both pods — but kubectl logs deploy/httpbin only tails one pod by default. Fixed by tailing both pods together with a label selector (kubectl logs -l app=httpbin --prefix), which surfaced all 4 attempts (1 original + 3 retries) across the two pods.
+Approach Used
+Rather than implementing every feature redundantly on every route, I distributed the 7 required behaviors across the 3 routes in a way that each is demonstrated clearly at least once — host-based routing on all three routes (all resolve to distinct backends by Host header), and path routing/rewrite/header injection/timeout concentrated on api-route (since httpbin has convenient test endpoints like /anything, /delay/{n}, /status/{code} purpose-built for this), retry on api-route, and rate limiting on test-route. This kept the YAML readable while still proving the underlying Gateway API/Envoy Gateway mechanism works identically regardless of which route it's attached to.
+Commands Used for Verification
+bash
+kubectl get gateway
+kubectl get gatewayclass
+kubectl get httproute
+kubectl get backendtrafficpolicy
+kubectl describe gateway company-gateway
+kubectl describe httproute api-route
+kubectl describe backendtrafficpolicy api-retry-policy
+kubectl describe backendtrafficpolicy test-rate-limit-policy
+
+kubectl port-forward -n envoy-gateway-system svc/envoy-default-company-gateway-73db4789 18080:80
+
+# Host-based routing
+curl -H "Host: web.company.local" http://localhost:18080/
+curl -H "Host: api.company.local" http://localhost:18080/get
+curl -H "Host: test.company.local" http://localhost:18080/
+
+Requirement	Status	Evidence
+Host-based routing	Completed	web.company.local, api.company.local, test.company.local route correctly
+ Path-based routing	Completed	/orders route configured
+ URL Rewrite	Completed	/orders → /anything
+ Header Injection	Completed	RequestHeaderModifier configured
+ Request Timeout	Completed	timeouts configured on HTTPRoute
+ Retry Policy	Completed	Multiple /status/500 requests seen in logs
+ Rate Limiting	Completed	HTTP 429 after the 10th request
+
+Kubernetes / Gateway API Resources Verified
+•	GatewayClass acceptance
+•	Gateway listener status (Accepted, ResolvedRefs)
+•	HTTPRoute attachment and per-route status conditions
+•	BackendTrafficPolicy acceptance (retry + rate limit)
+•	Host-based routing correctness (per-host response identity)
+•	Path rewrite and injected headers, confirmed via httpbin's echoed response
+•	Timeout enforcement (504 before the backend's own delay completed)
+•	Retry attempts across multiple backend pods
+•	Rate-limit threshold enforcement (200 → 429 transition at request 11)
+
+
+
+
+
+
+
+:/mnt/c/Users/tanmayj/Desktop/project/assignment/no.2$ kubectl get backendtrafficpolicy
+kubectl describe backendtrafficpolicy test-rate-limit-policy
+NAME                     AGE
+api-retry-policy         8m10s
+test-rate-limit-policy   82s
+Name:         test-rate-limit-policy
+Namespace:    default
+Labels:       <none>
+Annotations:  <none>
+API Version:  gateway.envoyproxy.io/v1alpha1
+Kind:         BackendTrafficPolicy
+Metadata:
+  Creation Timestamp:  2026-07-11T13:32:29Z
+  Generation:          1
+  Resource Version:    45531
+  UID:                 6ae610bc-d8c2-413c-ae91-05b19b680318
+Spec:
+  Rate Limit:
+    Local:
+      Rules:
+        Limit:
+          Requests:  10
+          Unit:      Minute
+    Type:            Local
+  Target Refs:
+    Group:  gateway.networking.k8s.io
+    Kind:   HTTPRoute
+    Name:   test-route
+Status:
+  Ancestors:
+    Ancestor Ref:
+      Group:      gateway.networking.k8s.io
+      Kind:       Gateway
+      Name:       company-gateway
+      Namespace:  default
+    Conditions:
+      Last Transition Time:  2026-07-11T13:32:29Z
+      Message:               Policy has been accepted.
+      Observed Generation:   1
+      Reason:                Accepted
+      Status:                True
+      Type:                  Accepted
+    Controller Name:         gateway.envoyproxy.io/gatewayclass-controller
+Events:                      <none>
+
+
+
+Windows PowerShell 5.1
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows
+
+PS C:\Users\tanmayj> wsl
+tanmayj@ESPL-0225-05:/mnt/c/Users/tanmayj$ curl -v -H "Host: web.company.local" http://localhost:18080/
+curl -v -H "Host: api.company.local" http://localhost:18080/get
+curl -v -H "Host: test.company.local" http://localhost:18080/
+* Host localhost:18080 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:18080...
+* Connected to localhost (::1) port 18080
+> GET / HTTP/1.1
+> Host: web.company.local
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< server: nginx/1.14.2
+< date: Sat, 11 Jul 2026 09:29:57 GMT
+< content-type: text/html
+< content-length: 612
+< last-modified: Tue, 04 Dec 2018 14:44:49 GMT
+< etag: "5c0692e1-264"
+< accept-ranges: bytes
+<
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+* Connection #0 to host localhost left intact
+* Host localhost:18080 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:18080...
+* Connected to localhost (::1) port 18080
+> GET /get HTTP/1.1
+> Host: api.company.local
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< access-control-allow-credentials: true
+< access-control-allow-origin: *
+< content-type: application/json; charset=utf-8
+< date: Sat, 11 Jul 2026 09:29:57 GMT
+< content-length: 481
+<
+{
+  "args": {},
+  "headers": {
+    "Accept": [
+      "*/*"
+    ],
+    "Host": [
+      "api.company.local"
+    ],
+    "User-Agent": [
+      "curl/8.5.0"
+    ],
+    "X-Envoy-External-Address": [
+      "127.0.0.1"
+    ],
+    "X-Forwarded-For": [
+      "10.244.0.2"
+    ],
+    "X-Forwarded-Proto": [
+      "http"
+    ],
+    "X-Request-Id": [
+      "329eeb65-1bd7-451e-bac3-fe4b5a3f60d2"
+    ]
+  },
+  "method": "GET",
+  "origin": "10.244.0.2",
+  "url": "http://api.company.local/get"
+}
+* Connection #0 to host localhost left intact
+* Host localhost:18080 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:18080...
+* Connected to localhost (::1) port 18080
+> GET / HTTP/1.1
+> Host: test.company.local
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< content-type: application/json; charset=utf-8
+< content-length: 2180
+< etag: W/"884-+yTQqZDpnMsJfTZkcrSRhU3NLP0"
+< date: Sat, 11 Jul 2026 09:29:57 GMT
+<
+{"host":{"hostname":"test.company.local","ip":"::ffff:10.244.0.2","ips":[]},"http":{"method":"GET","baseUrl":"","originalUrl":"/","protocol":"http"},"request":{"params":{"0":"/"},"query":{},"cookies":{},"body":{},"headers":{"host":"test.company.local","user-agent":"curl/8.5.0","accept":"*/*","x-forwarded-for":"10.244.0.2","x-forwarded-proto":"http","x-envoy-external-address":"127.0.0.1","x-request-id":"59652c1b-362b-49a4-b27c-d31b785b9935"}},"environment":{"PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOSTNAME":"echoserver-5c89fdb7c8-zghm5","NODE_VERSION":"20.11.0","YARN_VERSION":"1.22.19","PORT":"80","NGINX_SERVICE_PORT_HTTP":"80","NGINX_PORT_80_TCP":"tcp://10.96.109.98:80","NGINX_PORT_80_TCP_ADDR":"10.96.109.98","BACKEND_SERVICE_HOST":"10.96.222.55","BACKEND_PORT_3000_TCP_PORT":"3000","BACKEND_PORT_3000_TCP_ADDR":"10.96.222.55","HTTPBIN_PORT":"tcp://10.96.118.218:8080","HTTPBIN_PORT_8080_TCP_ADDR":"10.96.118.218","KUBERNETES_SERVICE_PORT_HTTPS":"443","NGINX_PORT":"tcp://10.96.109.98:80","NGINX_PORT_80_TCP_PROTO":"tcp","BACKEND_SERVICE_PORT_HTTP":"3000","BACKEND_PORT":"tcp://10.96.222.55:3000","BACKEND_PORT_3000_TCP_PROTO":"tcp","ECHOSERVER_SERVICE_PORT":"80","ECHOSERVER_SERVICE_PORT_HTTP":"80","ECHOSERVER_PORT_80_TCP":"tcp://10.96.89.233:80","HTTPBIN_SERVICE_HOST":"10.96.118.218","KUBERNETES_PORT":"tcp://10.96.0.1:443","KUBERNETES_PORT_443_TCP":"tcp://10.96.0.1:443","BACKEND_PORT_3000_TCP":"tcp://10.96.222.55:3000","ECHOSERVER_SERVICE_HOST":"10.96.89.233","ECHOSERVER_PORT_80_TCP_ADDR":"10.96.89.233","HTTPBIN_SERVICE_PORT":"8080","HTTPBIN_PORT_8080_TCP":"tcp://10.96.118.218:8080","KUBERNETES_SERVICE_PORT":"443","KUBERNETES_PORT_443_TCP_PORT":"443","ECHOSERVER_PORT_80_TCP_PORT":"80","HTTPBIN_SERVICE_PORT_HTTP":"8080","HTTPBIN_PORT_8080_TCP_PORT":"8080","KUBERNETES_SERVICE_HOST":"10.96.0.1","KUBERNETES_PORT_443_TCP_ADDR":"10.96.0.1","KUBERNETES_PORT_443_TCP_PROTO":"tcp","NGINX_SERVICE_HOST":"10.96.109.98","NGINX_SERVICE_PORT":"80","ECHOSERVER_PORT_80_TCP_PROTO":"tcp","HTTPBIN_PORT_8080_TCP* Connection #0 to host localhost left intact
+_PROTO":"tcp","NGINX_PORT_80_TCP_PORT":"80","BACKEND_SERVICE_PORT":"3000","ECHOSERVER_PORT":"tcp://10.96.89.233:80","HOME":"/root"}}tanmayj@ESPL-0225-05:/mnt/c/Users/tanmayj$
+
+
+
+tanmayj@ESPL-0225-05:/mnt/c/Users/tanmayj$ kubectl get gateway
+NAME              CLASS   ADDRESS   PROGRAMMED   AGE
+company-gateway   eg                False        38m
+tanmayj@ESPL-0225-05:/mnt/c/Users/tanmayj$ kubectl get gatewayclass
+NAME   CONTROLLER                                      ACCEPTED   AGE
+eg     gateway.envoyproxy.io/gatewayclass-controller   True       21h
+tanmayj@ESPL-0225-05:/mnt/c/Users/tanmayj$ kubectl get htttroute
+error: the server doesn't have a resource type "htttroute"
+tanmayj@ESPL-0225-05:/mnt/c/Users/tanmayj$ kubectl get httproute
+NAME            HOSTNAMES                AGE
+api-route       ["api.company.local"]    65m
+company-route   ["web.company.local"]    65m
+test-route      ["test.company.local"]   65m
+tanmayj@ESPL-0225-05:/mnt/c/Users/tanmayj$
+
