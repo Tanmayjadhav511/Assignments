@@ -1,0 +1,54 @@
+Assignment no 1
+
+Overview
+Deployed all three applications using Kubernetes Deployment YAML files.
+
+Applications Deployed
+•	Nginx
+•	Httpbin
+•	Echoserver
+
+Implementation Details
+•	Created Kubernetes Deployment YAML files for all applications.
+•	Configured resource requests and limits for containers.
+•	Applied Kubernetes Services for application connectivity.
+•	Added readiness probes to verify application availability before receiving traffic.
+•	Added liveness probes to automatically restart unhealthy containers.
+•	Used port forwarding commands in the terminal to access all three applications locally.
+•	
+Commands Used for Verification
+Check Kubernetes Pods
+kubectl get pods
+Check Deployments
+kubectl get deployments
+Check Services
+kubectl get svc
+
+
+Verify Deployment Rollout Status
+kubectl rollout status deployment/echoserver --timeout=120s
+
+kubectl rollout status deployment/httpbin --timeout=120s
+kubectl rollout status deployment/nginx-deployment --timeout=120s
+Access Applications Using Port Forwarding
+Nginx
+kubectl port-forward svc/nginx 8080:80
+Access:
+http://localhost:8080
+Echoserver
+kubectl port-forward svc/echoserver 8081:80
+Access:
+http://localhost:8081
+Httpbin
+kubectl port-forward svc/httpbin 8082:8080
+Access:
+http://localhost:8082
+Kubernetes Resources Verified
+•	Deployment status
+•	Pod health status
+•	Service configuration
+•	Readiness probe status
+•	Liveness probe status
+•	Local application accessibility through port forwarding
+
+
