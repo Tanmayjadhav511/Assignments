@@ -1,0 +1,47 @@
+Assignment No. 3
+Overview
+Installed cert-manager and configured a private self-signed Certificate Authority to issue TLS certificates for the cluster. Enabled HTTPS on the Envoy Gateway using a cert-manager-issued wildcard certificate covering all three application hostnames.
+Components Created
+•	Bootstrap self-signed Issuer
+•	Root CA Certificate (imesh-root-ca)
+•	ClusterIssuer (imesh-ca-issuer)
+•	Wildcard TLS Certificate (company-local-tls)
+•	Kubernetes TLS Secret (company-local-tls)
+•	HTTPS listener on company-gateway (port 443)
+Implementation Details
+•	Installed cert-manager via Helm into the cert-manager namespace, with clusterResourceNamespace=cert-manager so the CA secret and ClusterIssuer resolve correctly.
+•	Created a bootstrap self-signed Issuer, used once to mint our own root CA certificate (isCA: true).
+•	Created a ClusterIssuer backed by that root CA secret, so it can issue real certificates cluster-wide.
+•	Requested a single wildcard Certificate (*.company.local, with explicit SANs for web/api/test.company.local) from the ClusterIssuer — one cert covers all three hosts instead of three separate ones.
+•	Added a second listener (https, port 443, mode: Terminate) to the existing company-gateway, referencing the company-local-tls Secret, alongside the existing HTTP listener.
+•	Existing HTTPRoutes automatically attached to the new HTTPS listener without modification, since Gateway API attaches routes by hostname/allowedRoutes match, not per-listener config.
+
+
+
+Commands Used for Verification
+bash
+kubectl get clusterissuer imesh-ca-issuer
+kubectl get certificate -A
+kubectl get secret company-local-tls
+kubectl describe gateway company-gateway
+
+kubectl port-forward -n envoy-gateway-system svc/envoy-default-company-gateway-73db4789 18443:443
+
+curl --cacert /tmp/imesh-ca.crt --resolve web.company.local:18443:127.0.0.1 https://web.company.local:18443/
+curl --cacert /tmp/imesh-ca.crt --resolve api.company.local:18443:127.0.0.1 https://api.company.local:18443/get
+curl --cacert /tmp/imesh-ca.crt --resolve test.company.local:18443:127.0.0.1 https://test.company.local:18443/
+
+Problems Faced & How I Solved Them
+1. curl -H "Host: ..." failed the TLS handshake (filter_chain_not_found, connection reset)
+Envoy's HTTPS listener routes by SNI (set during the TLS handshake itself), not by the HTTP Host header (sent after TLS is already established). Connecting to https://localhost:18443 sent SNI localhost, which matched nothing. Fixed by using curl's --resolve host:port:ip flag instead, which makes curl use the real hostname for both SNI and cert verification while still connecting to 127.0.0.1.
+2. kubectl: command not found after previously working fine
+Bash had cached a stale binary path (/usr/local/bin/kubectl) that no longer existed, even though kubectl was correctly installed via snap (/snap/bin/kubectl, present in $PATH). Fixed with hash -r to clear bash's command cache and force re-resolution from $PATH.
+3. curl: (77) error setting certificate file
+The /tmp/imesh-ca.crt file referenced by --cacert didn't exist in the new shell session (opened a fresh WSL terminal partway through). Re-ran the kubectl get secret ... | base64 -d > /tmp/imesh-ca.crt extraction command to regenerate it before retrying.
+Kubernetes / TLS Resources Verified
+•	ClusterIssuer readiness (READY: True)
+•	Certificate issuance and Secret creation (kubernetes.io/tls, 3 data keys: tls.crt, tls.key, ca.crt)
+•	Gateway HTTPS listener status (Accepted, ResolvedRefs, Programmed)
+•	End-to-end TLS handshake with full CA chain validation (no -k flag needed)
+•	Correct routing over HTTPS to nginx, httpbin, and echoserver (confirmed via X-Forwarded-Proto: https in backend responses)
+•	Certificate details via openssl x509 (subject, issuer, validity window)
