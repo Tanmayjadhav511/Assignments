@@ -1,0 +1,41 @@
+# A bootstrap self-signed Issuer — only used once, to sign our own root CA.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-bootstrap
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+
+---
+# Ask that Issuer to mint a CA certificate. isCA: true is what makes this
+# usable as a root of trust rather than a normal leaf cert.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: imesh-root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: imesh-root-ca
+  secretName: imesh-root-ca-secret
+  duration: 8760h    # 1 year
+  renewBefore: 720h  # renew 30 days before expiry
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: Issuer
+    group: cert-manager.io
+
+---
+# A cluster-wide Issuer backed by that CA secret. From here on, any
+# Certificate that references this ClusterIssuer gets signed by our CA.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: imesh-ca-issuer
+spec:
+  ca:
+    secretName: imesh-root-ca-secret

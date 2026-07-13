@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: company-local-tls
+  namespace: default
+spec:
+  secretName: company-local-tls
+  duration: 2160h    # 90 days
+  renewBefore: 360h  # renew 15 days before expiry
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  dnsNames:
+    - "web.company.local"
+    - "api.company.local"
+    - "test.company.local"
+    - "*.company.local"
+  issuerRef:
+    name: imesh-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
